@@ -1,14 +1,12 @@
 import os
 import re
+import requests
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
-from supabase import create_client, Client
 
 app = FastAPI(title="Dzyon AI - Embedding Service")
 
-# Carregar variáveis de ambiente do Easypanel
-# Carregar variáveis de ambiente removendo espaços em branco acidentais (.strip())
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "") or os.getenv("SUPABASE_KEY", "")
 SUPABASE_KEY = SUPABASE_KEY.strip()
@@ -17,11 +15,27 @@ MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5").strip()
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Variáveis de ambiente do Supabase não configuradas!")
 
-# Inicializar o cliente do Supabase e o Modelo de Embedding local
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+REST_URL = SUPABASE_URL.rstrip("/") + "/rest/v1"
+
 print(f"Carregando modelo de embedding: {MODEL_NAME}...")
 model = SentenceTransformer(MODEL_NAME)
 print("Modelo carregado com sucesso!")
+
+
+def supabase_insert(table: str, data: dict) -> dict:
+    """Insere registro no Supabase via REST API e retorna o primeiro registro inserido."""
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+    resp = requests.post(f"{REST_URL}/{table}", json=data, headers=headers, timeout=15)
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"Supabase insert error ({table}): {resp.status_code} {resp.text[:200]}")
+    if not resp.json():
+        raise RuntimeError(f"Supabase insert returned empty ({table})")
+    return resp.json()[0]
 
 
 class KMInput(BaseModel):
@@ -31,18 +45,16 @@ class KMInput(BaseModel):
     product: str
     module: str
     category: str
-    raw_text: str  # Esse campo receberá o 'answer' bruto vindo do Progress
+    raw_text: str
 
 
 def parse_progress_text(text: str):
-    """Extrai o conteúdo entre [CAUSA]=...| e [SOLUCAO]=...|"""
     causa_match = re.search(r"\[CAUSA\]=(.*?)(?=\|\[|$)", text, re.DOTALL)
     solucao_match = re.search(r"\[SOLUCAO\]=(.*?)(?=\|\[|$)", text, re.DOTALL)
 
     causa = causa_match.group(1).strip() if causa_match else ""
     solucao = solucao_match.group(1).strip() if solucao_match else ""
 
-    # Se vier sem tags, limpa caracteres comuns e trata como texto geral
     if not causa and not solucao:
         clean_text = text.replace("|", "\n").strip()
         return clean_text, [("Conteúdo Geral", clean_text)]
@@ -61,10 +73,8 @@ def parse_progress_text(text: str):
 @app.post("/embed")
 async def process_and_embed(data: KMInput):
     try:
-        # 1. Parsear o texto bruto do ERP
         clean_text, sections = parse_progress_text(data.raw_text)
 
-        # 2. Inserir na tabela ai_sources (Documento Pai)
         source_data = {
             "source_type": "km",
             "erp_record_id": data.erp_record_id,
@@ -78,18 +88,13 @@ async def process_and_embed(data: KMInput):
             "clean_text": clean_text,
         }
 
-        source_response = supabase.table("ai_sources").insert(source_data).execute()
-        if not source_response.data:
-            raise HTTPException(status_code=500, detail="Falha ao salvar ai_sources.")
+        source = supabase_insert("ai_sources", source_data)
+        source_id = source["id"]
 
-        source_id = source_response.data[0]["id"]
-
-        # 3. Processar cada seção extraída (Gerar Chunks e Embeddings)
         for idx, (section_title, section_content) in enumerate(sections):
             if not section_content.strip():
                 continue
 
-            # Inserir o fragmento na tabela ai_chunks
             chunk_data = {
                 "source_id": source_id,
                 "chunk_index": idx,
@@ -101,22 +106,20 @@ async def process_and_embed(data: KMInput):
                 "char_count": len(section_content),
             }
 
-            chunk_response = supabase.table("ai_chunks").insert(chunk_data).execute()
-            if not chunk_response.data:
+            try:
+                chunk = supabase_insert("ai_chunks", chunk_data)
+            except RuntimeError:
                 continue
 
-            chunk_id = chunk_response.data[0]["id"]
-
-            # Gerar o vetor numérico localmente usando o BGE-Small
+            chunk_id = chunk["id"]
             embedding_vector = model.encode(section_content).tolist()
 
-            # Inserir o vetor na tabela ai_embeddings
             embedding_data = {
                 "chunk_id": chunk_id,
                 "model_name": MODEL_NAME,
                 "embedding": embedding_vector,
             }
-            supabase.table("ai_embeddings").insert(embedding_data).execute()
+            supabase_insert("ai_embeddings", embedding_data)
 
         return {
             "status": "success",
