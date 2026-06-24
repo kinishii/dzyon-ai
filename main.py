@@ -114,6 +114,13 @@ async def process_and_embed(data: KMInput):
             chunk_id = chunk["id"]
             embedding_vector = model.encode(section_content).tolist()
 
+            # Schema exige 1536 dimensoes (OpenAI ada-002 padrao)
+            # BGE-small gera 512 — padding com zeros para 1536
+            EMBED_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
+            current_dim = len(embedding_vector)
+            if current_dim < EMBED_DIM:
+                embedding_vector += [0.0] * (EMBED_DIM - current_dim)
+
             embedding_data = {
                 "chunk_id": chunk_id,
                 "model_name": MODEL_NAME,
