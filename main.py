@@ -10,7 +10,8 @@ app = FastAPI(title="Dzyon AI - Embedding Service")
 # Carregar variáveis de ambiente do Easypanel
 # Carregar variáveis de ambiente removendo espaços em branco acidentais (.strip())
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "").strip()
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "") or os.getenv("SUPABASE_KEY", "")
+SUPABASE_KEY = SUPABASE_KEY.strip()
 MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5").strip()
 
 if not SUPABASE_URL or not SUPABASE_KEY:
