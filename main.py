@@ -39,13 +39,13 @@ def supabase_insert(table: str, data: dict) -> dict:
 
 
 class KMInput(BaseModel):
-    erp_record_id: str
-    title: str
-    summary: str
-    product: str
-    module: str
-    category: str
-    raw_text: str
+    erp_record_id: str = ""
+    title: str = ""
+    summary: str = ""
+    product: str = ""
+    module: str = ""
+    category: str = ""
+    raw_text: str = ""
 
 
 def parse_progress_text(text: str):
@@ -72,7 +72,10 @@ def parse_progress_text(text: str):
 
 @app.post("/embed")
 async def process_and_embed(data: KMInput):
+    print(f"[DZYON] Recebido: erp_record_id={data.erp_record_id!r} title={data.title!r} raw_text={data.raw_text[:100]!r}")
     try:
+        if not data.raw_text:
+            raise HTTPException(status_code=400, detail="raw_text vazio")
         clean_text, sections = parse_progress_text(data.raw_text)
 
         source_data = {
@@ -142,3 +145,9 @@ async def process_and_embed(data: KMInput):
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "model": MODEL_NAME}
+
+
+@app.post("/echo")
+async def echo(data: KMInput):
+    """Debug: retorna os dados recebidos como foram enviados."""
+    return {"received": data.model_dump()} if hasattr(data, "model_dump") else {"received": data.dict()}
