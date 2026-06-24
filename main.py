@@ -1,7 +1,7 @@
 import os
 import re
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
@@ -149,5 +149,19 @@ def health_check():
 
 @app.post("/echo")
 async def echo(data: KMInput):
-    """Debug: retorna os dados recebidos como foram enviados."""
-    return {"received": data.model_dump()} if hasattr(data, "model_dump") else {"received": data.dict()}
+    return {"received": data.model_dump() if hasattr(data, "model_dump") else data.dict()}
+
+
+@app.post("/raw-debug")
+async def raw_debug(request: Request):
+    """Debug: retorna o body CRU como recebido, antes de qualquer validacao."""
+    body = await request.body()
+    headers = dict(request.headers)
+    print(f"[RAW-DEBUG] Headers: {headers}")
+    print(f"[RAW-DEBUG] Body ({len(body)} bytes): {body[:500]!r}")
+    return {
+        "content_type": headers.get("content-type", ""),
+        "body_length": len(body),
+        "body_preview": body[:500].decode("utf-8", errors="replace"),
+        "body_hex": body[:100].hex(),
+    }
