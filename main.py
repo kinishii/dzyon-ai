@@ -50,7 +50,7 @@ class KMInput(BaseModel):
 
 def parse_progress_text(text: str):
     causa_match = re.search(r"\[CAUSA\]=(.*?)(?=\|\[|$)", text, re.DOTALL)
-    solucao_match = re.search(r"\[SOLU[CÇ]ÃO\]=(.*?)(?=\|\[|$)", text, re.DOTALL)
+    solucao_match = re.search(r"\[SOLU[CÇ][AÃ]O\]=(.*?)(?=\|\[|$)", text, re.DOTALL)
 
     causa = causa_match.group(1).strip() if causa_match else ""
     solucao = solucao_match.group(1).strip() if solucao_match else ""
