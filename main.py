@@ -76,7 +76,7 @@ async def process_and_embed(data: KMInput):
         clean_text, sections = parse_progress_text(data.raw_text)
 
         source_data = {
-            "source_type": "km",
+            "source_type": "kb_article",
             "erp_record_id": data.erp_record_id,
             "erp_table_name": "km-doc-ms",
             "title": data.title,
