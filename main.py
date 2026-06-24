@@ -91,6 +91,7 @@ async def process_and_embed(data: KMInput):
         source = supabase_insert("ai_sources", source_data)
         source_id = source["id"]
 
+        chunks_ok = 0
         for idx, (section_title, section_content) in enumerate(sections):
             if not section_content.strip():
                 continue
@@ -103,12 +104,11 @@ async def process_and_embed(data: KMInput):
                 "product": data.product,
                 "module": data.module,
                 "category": data.category,
-                "char_count": len(section_content),
             }
 
             try:
                 chunk = supabase_insert("ai_chunks", chunk_data)
-            except RuntimeError:
+            except RuntimeError as e:
                 continue
 
             chunk_id = chunk["id"]
@@ -120,11 +120,12 @@ async def process_and_embed(data: KMInput):
                 "embedding": embedding_vector,
             }
             supabase_insert("ai_embeddings", embedding_data)
+            chunks_ok += 1
 
         return {
             "status": "success",
             "ai_source_id": source_id,
-            "chunks_processed": len(sections),
+            "chunks_processed": chunks_ok,
         }
 
     except Exception as e:
