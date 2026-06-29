@@ -4,6 +4,7 @@ import requests
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
+from typing import Optional
 
 app = FastAPI(title="Dzyon AI - Embedding Service")
 
@@ -16,6 +17,8 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Variáveis de ambiente do Supabase não configuradas!")
 
 REST_URL = SUPABASE_URL.rstrip("/") + "/rest/v1"
+
+EMBED_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
 
 print(f"Carregando modelo de embedding: {MODEL_NAME}...")
 model = SentenceTransformer(MODEL_NAME)
@@ -117,9 +120,6 @@ async def process_and_embed(data: KMInput):
             chunk_id = chunk["id"]
             embedding_vector = model.encode(section_content).tolist()
 
-            # Schema exige 1536 dimensoes (OpenAI ada-002 padrao)
-            # BGE-small gera 512 — padding com zeros para 1536
-            EMBED_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
             current_dim = len(embedding_vector)
             if current_dim < EMBED_DIM:
                 embedding_vector += [0.0] * (EMBED_DIM - current_dim)
@@ -145,6 +145,65 @@ async def process_and_embed(data: KMInput):
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "model": MODEL_NAME}
+
+
+def embed_text(text: str) -> list:
+    vec = model.encode(text).tolist()
+    if len(vec) < EMBED_DIM:
+        vec += [0.0] * (EMBED_DIM - len(vec))
+    return vec
+
+
+class SearchRequest(BaseModel):
+    query: str
+    product: Optional[str] = None
+    module: Optional[str] = None
+    top_k: int = 10
+    threshold: float = 0.5
+
+
+class EmbedQueryRequest(BaseModel):
+    text: str
+
+
+@app.post("/search")
+async def search_kms(req: SearchRequest):
+    try:
+        query_vec = embed_text(req.query)
+
+        rpc_url = f"{REST_URL}/rpc/match_chunks"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "query_embedding": query_vec,
+            "match_count": req.top_k,
+            "match_threshold": req.threshold,
+        }
+        if req.product:
+            payload["filter_product"] = req.product
+        if req.module:
+            payload["filter_module"] = req.module
+
+        resp = requests.post(rpc_url, json=payload, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=500, detail=f"Supabase RPC error: {resp.text[:300]}")
+
+        return {"results": resp.json(), "count": len(resp.json())}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/embed-query")
+async def embed_query(req: EmbedQueryRequest):
+    try:
+        vec = embed_text(req.text)
+        return {"embedding": vec, "dimensions": len(vec), "model": MODEL_NAME}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/echo")
