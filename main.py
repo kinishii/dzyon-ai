@@ -138,8 +138,27 @@ async def process_and_embed(data: KMInput):
             "chunks_processed": chunks_ok,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        detail = str(e)
+        if "23505" in detail and "already exists" in detail:
+            import json
+            erp_id = data.erp_record_id
+            try:
+                headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+                get_url = f"{REST_URL}/ai_sources?erp_record_id=eq.{erp_id}&select=id,title"
+                existente = requests.get(get_url, headers=headers, timeout=10)
+                source_id = existente.json()[0]["id"] if existente.status_code == 200 and existente.json() else None
+            except Exception:
+                source_id = None
+            return {
+                "status": "duplicate_skipped",
+                "message": f"KM {erp_id} ja existe no banco. Nada foi duplicado.",
+                "ai_source_id": source_id,
+                "chunks_processed": 0,
+            }
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @app.get("/health")
