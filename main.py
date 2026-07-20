@@ -68,6 +68,8 @@ class KMInput(BaseModel):
 class FeedbackInput(BaseModel):
     question: str
     is_useful: bool
+    response: Optional[str] = None
+    source_cited: Optional[str] = None
 
 
 @app.post("/feedback")
@@ -75,7 +77,9 @@ async def save_feedback(data: FeedbackInput):
     try:
         supabase_insert("ai_feedback", {
             "question": data.question,
-            "is_useful": data.is_useful
+            "is_useful": data.is_useful,
+            "response": data.response,
+            "source_cited": data.source_cited
         })
         return {"status": "success"}
     except Exception as e:
