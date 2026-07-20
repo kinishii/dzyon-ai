@@ -41,6 +41,18 @@ def supabase_insert(table: str, data: dict) -> dict:
     return resp.json()[0]
 
 
+def supabase_delete(table: str, match_column: str, match_value: str):
+    """Deleta registros no Supabase usando filtro de coluna."""
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}"
+    }
+    url = f"{REST_URL}/{table}?{match_column}=eq.{match_value}"
+    resp = requests.delete(url, headers=headers, timeout=15)
+    if resp.status_code not in (200, 204):
+        print(f"Supabase delete warning ({table}): {resp.status_code} {resp.text[:200]}")
+
+
 class KMInput(BaseModel):
     erp_record_id: str = ""
     title: str = ""
@@ -49,6 +61,8 @@ class KMInput(BaseModel):
     module: str = ""
     category: str = ""
     raw_text: str = ""
+    force_update: bool = False
+    erp_internal_id: str = ""
 
 
 def parse_progress_text(text: str):
@@ -75,10 +89,15 @@ def parse_progress_text(text: str):
 
 @app.post("/embed")
 async def process_and_embed(data: KMInput):
-    print(f"[DZYON] Recebido: erp_record_id={data.erp_record_id!r} title={data.title!r} raw_text={data.raw_text[:100]!r}")
+    print(f"[DZYON] Recebido: erp_record_id={data.erp_record_id!r} force_update={data.force_update} internal_id={data.erp_internal_id!r}")
     try:
         if not data.raw_text:
             raise HTTPException(status_code=400, detail="raw_text vazio")
+            
+        if data.force_update:
+            print(f"[DZYON] Deletando registro antigo (se existir): {data.erp_record_id}")
+            supabase_delete("ai_sources", "erp_record_id", data.erp_record_id)
+            
         clean_text, sections = parse_progress_text(data.raw_text)
 
         source_data = {
@@ -92,6 +111,7 @@ async def process_and_embed(data: KMInput):
             "category": data.category,
             "raw_text": data.raw_text,
             "clean_text": clean_text,
+            "metadata": {"internal_id": data.erp_internal_id}
         }
 
         source = supabase_insert("ai_sources", source_data)
