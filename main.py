@@ -230,7 +230,27 @@ async def search_kms(req: SearchRequest):
         if resp.status_code != 200:
             raise HTTPException(status_code=500, detail=f"Supabase RPC error: {resp.text[:300]}")
 
-        return {"results": resp.json(), "count": len(resp.json())}
+        results = resp.json()
+
+        # [NOVO] Injeta o metadata (com o id_interno) vindo da tabela ai_sources nos resultados
+        source_ids = list(set([r["source_id"] for r in results if "source_id" in r]))
+        if source_ids:
+            try:
+                # Monta a string no formato: in.("id1","id2")
+                ids_str = ",".join([f'"{sid}"' for sid in source_ids])
+                get_url = f"{REST_URL}/ai_sources?id=in.({ids_str})&select=id,metadata"
+                meta_resp = requests.get(get_url, headers=headers, timeout=10)
+                
+                if meta_resp.status_code == 200:
+                    meta_dict = {row["id"]: row.get("metadata", {}) for row in meta_resp.json()}
+                    for r in results:
+                        sid = r.get("source_id")
+                        if sid in meta_dict:
+                            r["metadata"] = meta_dict[sid]
+            except Exception as e:
+                print("Erro ao anexar metadados:", e)
+
+        return {"results": results, "count": len(results)}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
