@@ -65,6 +65,23 @@ class KMInput(BaseModel):
     erp_internal_id: str = ""
 
 
+class FeedbackInput(BaseModel):
+    question: str
+    is_useful: bool
+
+
+@app.post("/feedback")
+async def save_feedback(data: FeedbackInput):
+    try:
+        supabase_insert("ai_feedback", {
+            "question": data.question,
+            "is_useful": data.is_useful
+        })
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def parse_progress_text(text: str):
     causa_match = re.search(r"\[CAUSA\]=(.*?)(?=\|\s*\[|$)", text, re.DOTALL)
     solucao_match = re.search(r"\[SOLU[CÇ][AÃ]O\]=(.*?)(?=\|\s*\[|$)", text, re.DOTALL)
