@@ -68,6 +68,7 @@ class KMInput(BaseModel):
 class FeedbackInput(BaseModel):
     question: str
     is_useful: bool
+    rating: Optional[int] = None
     response: Optional[str] = None
     source_cited: Optional[str] = None
 
@@ -78,6 +79,7 @@ async def save_feedback(data: FeedbackInput):
         supabase_insert("ai_feedback", {
             "question": data.question,
             "is_useful": data.is_useful,
+            "rating": data.rating,
             "response": data.response,
             "source_cited": data.source_cited
         })
