@@ -71,6 +71,7 @@ class FeedbackInput(BaseModel):
     rating: Optional[int] = None
     response: Optional[str] = None
     source_cited: Optional[str] = None
+    km_ids: Optional[str] = None
 
 
 @app.post("/feedback")
@@ -81,7 +82,8 @@ async def save_feedback(data: FeedbackInput):
             "is_useful": data.is_useful,
             "rating": data.rating,
             "response": data.response,
-            "source_cited": data.source_cited
+            "source_cited": data.source_cited,
+            "km_ids": data.km_ids
         })
         return {"status": "success"}
     except Exception as e:
