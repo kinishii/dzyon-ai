@@ -2,6 +2,8 @@ import os
 import re
 import requests
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 from typing import Optional
@@ -23,6 +25,31 @@ EMBED_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
 print(f"Carregando modelo de embedding: {MODEL_NAME}...")
 model = SentenceTransformer(MODEL_NAME)
 print("Modelo carregado com sucesso!")
+
+
+@app.exception_handler(RequestValidationError)
+async def log_validation_error(request: Request, exc: RequestValidationError):
+    """Loga body cru + erros Pydantic em todo 422 (ex.: JSON invalido do Progress)."""
+    body = b""
+    try:
+        body = await request.body()
+    except Exception as e:
+        body = f"<body unread: {e}>".encode()
+
+    client = request.client.host if request.client else "?"
+    ctype = request.headers.get("content-type", "")
+    preview = body[:1000].decode("utf-8", errors="replace")
+    hex_head = body[:64].hex() if body else ""
+
+    print("=" * 72)
+    print(f"[422] {client} {request.method} {request.url.path}")
+    print(f"[422] content-type={ctype!r} content-length={request.headers.get('content-length')}")
+    print(f"[422] body_bytes={len(body)} hex64={hex_head}")
+    print(f"[422] body_preview={preview!r}")
+    print(f"[422] errors={exc.errors()}")
+    print("=" * 72)
+
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 def supabase_insert(table: str, data: dict) -> dict:
