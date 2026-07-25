@@ -27,6 +27,40 @@ model = SentenceTransformer(MODEL_NAME)
 print("Modelo carregado com sucesso!")
 
 
+def _sanitize_json_body_bytes(body: bytes) -> bytes:
+    """Torna JSON montado no Progress parseavel: controles -> espaco, \\ -> /."""
+    if not body:
+        return body
+    out = bytearray(len(body))
+    for i, b in enumerate(body):
+        if b < 32 or b == 127:
+            out[i] = 32  # espaco
+        elif b == 92:  # backslash \
+            out[i] = 47  # /
+        else:
+            out[i] = b
+    return bytes(out)
+
+
+@app.middleware("http")
+async def sanitize_embed_json(request: Request, call_next):
+    """Progress costuma mandar LF/TAB e paths com \\ dentro do JSON (422)."""
+    if request.method == "POST" and request.url.path in ("/embed", "/echo"):
+        body = await request.body()
+        cleaned = _sanitize_json_body_bytes(body)
+        if cleaned != body:
+            print(
+                f"[SANITIZE] {request.url.path}: body {len(body)}b -> {len(cleaned)}b "
+                f"(controles/backslash normalizados)"
+            )
+
+        async def receive():
+            return {"type": "http.request", "body": cleaned, "more_body": False}
+
+        request = Request(request.scope, receive)
+    return await call_next(request)
+
+
 @app.exception_handler(RequestValidationError)
 async def log_validation_error(request: Request, exc: RequestValidationError):
     """Loga body cru + erros Pydantic em todo 422 (ex.: JSON invalido do Progress)."""
