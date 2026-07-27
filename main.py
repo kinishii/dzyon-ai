@@ -1,10 +1,11 @@
+import json
 import os
 import re
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sentence_transformers import SentenceTransformer
 from typing import Optional
 
@@ -42,23 +43,30 @@ def _sanitize_json_body_bytes(body: bytes) -> bytes:
     return bytes(out)
 
 
-@app.middleware("http")
-async def sanitize_embed_json(request: Request, call_next):
-    """Progress costuma mandar LF/TAB e paths com \\ dentro do JSON (422)."""
-    if request.method == "POST" and request.url.path in ("/embed", "/echo"):
-        body = await request.body()
-        cleaned = _sanitize_json_body_bytes(body)
-        if cleaned != body:
-            print(
-                f"[SANITIZE] {request.url.path}: body {len(body)}b -> {len(cleaned)}b "
-                f"(controles/backslash normalizados)"
-            )
+def _parse_km_input(body: bytes) -> "KMInput":
+    """Sanitize + json.loads no endpoint.
 
-        async def receive():
-            return {"type": "http.request", "body": cleaned, "more_body": False}
-
-        request = Request(request.scope, receive)
-    return await call_next(request)
+    O @app.middleware('http') do FastAPI (BaseHTTPMiddleware) NAO reinsere o body
+    de forma confiavel — o teste real ZYON00003 ainda 422ava com LF no summary
+    mesmo apos o middleware 'SANITIZE'. Parse manual evita isso.
+    """
+    cleaned = _sanitize_json_body_bytes(body)
+    if cleaned != body:
+        print(f"[SANITIZE] embed/echo: {len(body)}b -> {len(cleaned)}b")
+    try:
+        text = cleaned.decode("utf-8")
+    except UnicodeDecodeError:
+        text = cleaned.decode("latin-1")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as e:
+        print(f"[EMBED] JSON invalido pos-sanitize: {e} preview={text[:500]!r}")
+        raise HTTPException(status_code=422, detail=f"JSON invalido: {e}") from e
+    try:
+        return KMInput(**payload)
+    except ValidationError as e:
+        print(f"[EMBED] payload invalido: {e.errors()}")
+        raise HTTPException(status_code=422, detail=e.errors()) from e
 
 
 @app.exception_handler(RequestValidationError)
@@ -174,7 +182,8 @@ def parse_progress_text(text: str):
 
 
 @app.post("/embed")
-async def process_and_embed(data: KMInput):
+async def process_and_embed(request: Request):
+    data = _parse_km_input(await request.body())
     print(f"[DZYON] Recebido: erp_record_id={data.erp_record_id!r} force_update={data.force_update} internal_id={data.erp_internal_id!r}")
     try:
         if not data.raw_text:
@@ -352,7 +361,8 @@ async def embed_query(req: EmbedQueryRequest):
 
 
 @app.post("/echo")
-async def echo(data: KMInput):
+async def echo(request: Request):
+    data = _parse_km_input(await request.body())
     return {"received": data.model_dump() if hasattr(data, "model_dump") else data.dict()}
 
 
